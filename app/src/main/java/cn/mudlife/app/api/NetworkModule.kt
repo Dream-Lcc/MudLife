@@ -131,7 +131,7 @@ object NetworkModule {
             var tryCount = 0
             var resp: okhttp3.Response? = null
             var lastException: Exception? = null
-            val canRetry = (req.method == "GET")
+            val canRetry = (req.method == "GET" && !req.url.encodedPath.contains("verification") && !req.url.encodedPath.contains("verify"))
             val maxTries = if (canRetry) 2 else 1
 
             while (tryCount < maxTries) {

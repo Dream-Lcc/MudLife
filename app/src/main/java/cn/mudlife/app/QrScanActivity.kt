@@ -89,7 +89,7 @@ class QrScanActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         }
         val title = TextView(this).apply {
-            text = "扫描设备二维码（饮水机 / 热水器）"
+            text = "扫描饮水机二维码"
             setTextColor(Color.WHITE)
             textSize = 16f
         }
@@ -133,6 +133,7 @@ class QrScanActivity : AppCompatActivity() {
         cam.cameraControl.enableTorch(torchOn)
     }
 
+    @androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
     private fun startCamera() {
         val providerFuture = ProcessCameraProvider.getInstance(this)
         providerFuture.addListener({

@@ -1,12 +1,12 @@
 {
-  "versionCode": 23,
-  "versionName": "1.3.15",
+  "versionCode": 24,
+  "versionName": "1.3.16",
   "releaseDate": "2026-09-16",
-  "title": "MudLife v1.3.15",
-  "changelog": "视觉与交互升级：\n\n“我的”页面材质强化：优化半透明磨砂卡片的对比度与边缘微质感，层级更分明，解决在部分屏幕下发灰或泛白的问题；\n悬浮微光胶囊 Toast 与线框图标：重构磨砂微光悬浮 Toast；采用极简素雅线框矢量图标，视觉更轻快。\n\n功能完善与体验修复：\n\n出水计时异常修复：解决开阀出水时残留时间戳的问题；重构覆写逻辑，增加失效校验与进程异常退出时的残留清理；\n吹风机抽选换码：针对使用码失效或被占用的情况，优化轮换抽选逻辑；\n应用更新：集成国内高速镜像通道（FastCDN / jsDelivr），支持在应用内检测新版本并一键下载安装；\nGitHub主页入口：在关于页面新增 GitHub 源代码与仓库直达链接，方便查阅源码与提交 Issue。\n\n底层重构与平滑升级：\n\n包名与架构规范化：全工程迁移至独立包名 cn.mudlife.app，脱钩历史遗留命名空间；\n无感自动迁移：内置本地存储平滑迁移机制，老版本升级后自动同步登录凭据与个性化配置，无需重新登录。",
-  "downloadUrl": "https://github.com/Cainite07/MudLife/releases/download/v1.3.15/MudLife-v1.3.15.apk",
+  "title": "MudLife v1.3.16",
+  "changelog": "架构彻底重构与硬件场景精准对齐：\n\n业务场景对齐：依本校硬件现状全面重构，趣智校园专用于直饮水机与吹风机，趣智后勤热水专用于浴室洗浴；彻底厘清手机端边界，去除虚假的洗浴关阀控制；\n剥离前身遗留无用代码：全面剔除“linyu”前身为其他学校开发的蓝牙低功耗扫描探测（NearbyDevice / BLE）、洗手台（Washbasin）、寝室绑定（boundRoom）等全部冗余逻辑与数据类；\n直饮水机 0.2s 极速探活：秒表走秒与网络探活完全解耦，后台探活协程以 200ms (0.2s) 超高灵敏度轮询设备状态，机身物理按键关闭出水即刻感知并结算；\n关水安全兜底与防丢单保护：出水停止流程加入双层关闭核验，关水未确认成功绝不强行清除活跃订单，提醒用户现场复核，杜绝扣费丢单风险；\n常用饮水机多校区账户保护：修复设备卡片更新时丢失已绑定 projectId 的问题，确保跨校区、多项目账户映射准确无误；\n网络与日志安全强化：验证码请求豁免 GET 自动重试防止触发防刷；AppLogger 增加对使用码、密钥与验证码的全局正则脱敏；收敛 FileProvider 目录权限；修复 CameraX 相机特性声明与 API 兼容。",
+  "downloadUrl": "https://github.com/Cainite07/MudLife/releases/download/v1.3.16/MudLife-v1.3.16.apk",
   "mirrors": [
-    "https://ghfast.top/https://github.com/Cainite07/MudLife/releases/download/v1.3.15/MudLife-v1.3.15.apk",
-    "https://ghproxy.net/https://github.com/Cainite07/MudLife/releases/download/v1.3.15/MudLife-v1.3.15.apk"
+    "https://ghfast.top/https://github.com/Cainite07/MudLife/releases/download/v1.3.16/MudLife-v1.3.16.apk",
+    "https://ghproxy.net/https://github.com/Cainite07/MudLife/releases/download/v1.3.16/MudLife-v1.3.16.apk"
   ]
 }

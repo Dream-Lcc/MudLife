@@ -65,6 +65,11 @@ object AppLogger {
     private val REGEX_PHONE = Regex("(1[3-9]\\d)\\d{4}(\\d{4})")
     private val REGEX_PASSWORD_URL = Regex("password=([^&]+)")
     private val REGEX_PASSWORD_JSON = Regex(""""password"\s*:\s*"([^"]+)"""")
+    private val REGEX_USE_CODE_URL = Regex("useCode=([^&]+)")
+    private val REGEX_USE_CODE_JSON = Regex(""""(?:useCode|randomCode|customCode)"\s*:\s*"([^"]+)"""")
+    private val REGEX_SECRET_URL = Regex("secret=([^&]+)")
+    private val REGEX_SECRET_JSON = Regex(""""secret"\s*:\s*"([^"]+)"""")
+    private val REGEX_VERIFY_CODE = Regex(""""(?:verificationCode|verifyCode|code)"\s*:\s*"([^"]+)"""")
 
     private val logList = LinkedList<LogEntry>()
     private var nextId = 1L
@@ -291,6 +296,11 @@ object AppLogger {
         res = REGEX_PHONE.replace(res) { "${it.groupValues[1]}****${it.groupValues[2]}" }
         res = REGEX_PASSWORD_URL.replace(res) { "password=******" }
         res = REGEX_PASSWORD_JSON.replace(res) { "\"password\":\"******\"" }
+        res = REGEX_USE_CODE_URL.replace(res) { "useCode=***" }
+        res = REGEX_USE_CODE_JSON.replace(res) { "\"code\":\"***\"" }
+        res = REGEX_SECRET_URL.replace(res) { "secret=***" }
+        res = REGEX_SECRET_JSON.replace(res) { "\"secret\":\"***\"" }
+        res = REGEX_VERIFY_CODE.replace(res) { "\"code\":\"***\"" }
         return res
     }
 }

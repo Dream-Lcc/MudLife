@@ -27,7 +27,6 @@ import cn.mudlife.app.model.BillItem
 import cn.mudlife.app.model.BillDTO
 import cn.mudlife.app.model.DeviceInfo
 import cn.mudlife.app.model.MqttOrderMsg
-import cn.mudlife.app.model.NearbyDevice
 import cn.mudlife.app.model.WalletData
 import cn.mudlife.app.utils.MqttManager
 import cn.mudlife.app.utils.PrefsHelper
@@ -43,9 +42,6 @@ import kotlin.math.abs
 class MainViewModel : ViewModel() {
 
     var walletInfo by mutableStateOf<WalletData?>(null)
-    val nearbyDevices = mutableStateListOf<NearbyDevice>()
-    var isScanning by mutableStateOf(false)
-    private var scanStartTime = 0L
 
     var isShowering by mutableStateOf(false)
     var isStartingShower by mutableStateOf(false)
@@ -83,11 +79,11 @@ class MainViewModel : ViewModel() {
 
     val activeOrders = mutableStateListOf<ActiveOrder>()
     private var activeDeviceSnCodes = mutableSetOf<String>()
-    private val fetchingMacs = mutableSetOf<String>()
     private val gson = Gson()
     private var mqttManager: MqttManager? = null
     private var timerJob: Job? = null
     private var orderPollJob: Job? = null
+    private var probeJob: Job? = null
 
     var billList by mutableStateOf<List<BillItem>>(emptyList())
     var isLoadingBills by mutableStateOf(false)
@@ -175,18 +171,8 @@ class MainViewModel : ViewModel() {
 
     override fun onCleared() {
         super.onCleared()
-        timerJob?.cancel(); orderPollJob?.cancel()
+        timerJob?.cancel(); orderPollJob?.cancel(); probeJob?.cancel(); probeJob?.cancel()
         mqttManager?.disconnect()
-    }
-
-    fun startScan() {
-        nearbyDevices.clear(); activeDeviceSnCodes.clear()
-        isScanning = true; scanStartTime = System.currentTimeMillis(); onScanTimeout()
-    }
-    fun onScanTimeout() {
-        val e = System.currentTimeMillis() - scanStartTime
-        if (e < 600) viewModelScope.launch { delay(600 - e); isScanning = false }
-        else isScanning = false
     }
 
     // ── 扫码绑定 ──
@@ -213,7 +199,6 @@ class MainViewModel : ViewModel() {
                     // 弹出设备详情
                     selectedDevice = info; showDeviceDetail = true
                     refreshDeviceStatus(info.snCode, info.projectId?.toString())
-                    isScanning = false
                 } else {
                     toastMessage = resp.displayMessage ?: "未找到该设备"
                     checkKick(resp.displayMessage)
@@ -235,12 +220,6 @@ class MainViewModel : ViewModel() {
 
     // ── 点击设备 ──
     fun fetchDeviceInfo(mac: String) {
-        val cached = nearbyDevices.find { it.mac == mac }?.deviceInfo
-        if (cached != null) {
-            selectedDevice = cached; showDeviceDetail = true
-            viewModelScope.launch { refreshDeviceStatus(cached.snCode, cached.projectId?.toString()) }
-            return
-        }
         viewModelScope.launch {
             try {
                 val resp = NetworkModule.apiService.getDeviceInfoSafe(mac)
@@ -271,7 +250,7 @@ class MainViewModel : ViewModel() {
                 // 只有自己的订单才加入 activeOrders
                 if (isOwner && activeOrders.none { it.snCode == snCode }) {
                     val orderNo = q.data?.orderNo ?: ""
-                    val deviceInfo = nearbyDevices.find { it.deviceInfo?.snCode == snCode }?.deviceInfo ?: selectedDevice
+                    val deviceInfo = selectedDevice
                     if (deviceInfo != null) {
                         activeOrders.add(ActiveOrder(snCode, orderNo, deviceInfo.displayName, deviceInfo.macAddress, deviceInfo.typeEmoji, deviceInfo.withholdMoney, projectId = pid))
                         saveOrders()
@@ -516,7 +495,8 @@ class MainViewModel : ViewModel() {
             mac = device.macAddress,
             snCode = snCode,
             emoji = device.typeEmoji,
-            waterType = waterType
+            waterType = waterType,
+            projectId = device.projectId?.toString()
         )
         PrefsHelper.addRecentDevice(recentDev)
         recentDevices = PrefsHelper.getRecentDevices()
@@ -545,15 +525,29 @@ class MainViewModel : ViewModel() {
                         }
                     }
                 }
+            }
+        }
 
-                // 0.5 秒极速探活：实时检查设备是否已被机身按键关闭
+        // 0.2 秒极速探活协程：实时检查饮水机是否已被机身按键关闭（200ms）
+        probeJob?.cancel()
+        probeJob = viewModelScope.launch(Dispatchers.IO) {
+            val overridePid = device.projectId?.toString() ?: selectedDevice?.projectId?.toString()
+            while (isShowering) {
+                delay(200L)
                 try {
-                    val overridePid = selectedDevice?.projectId?.toString()
                     val q = NetworkModule.apiService.queryUsingSafe(snCode = snCode, auth = NetworkModule.authFields(overrideProjectId = overridePid))
                     if (q.success && q.data?.orderNo == null && q.errorCode != 307) {
-                        // 设备已在机身按键关闭 → 立即完成出水
-                        onAutoClose(snCode)
+                        kotlinx.coroutines.withContext(Dispatchers.Main) {
+                            onAutoClose(snCode)
+                        }
                         return@launch
+                    }
+                    if (currentOrderNo == null && q.success && !q.data?.orderNo.isNullOrEmpty()) {
+                        kotlinx.coroutines.withContext(Dispatchers.Main) {
+                            val oNo = q.data!!.orderNo!!
+                            currentOrderNo = oNo
+                            updateOrderNo(snCode, oNo)
+                        }
                     }
                 } catch (_: Exception) {}
             }
@@ -561,14 +555,16 @@ class MainViewModel : ViewModel() {
     }
 
     private fun handleMqttMessage(message: String) {
-        try {
-            val msg = gson.fromJson(message, MqttOrderMsg::class.java)
-            msg.orderNo?.let { orderNo -> if (currentOrderNo == null) { currentOrderNo = orderNo; showerSnCode?.let { sn -> updateOrderNo(sn, orderNo) } } }
-            msg.consumeMoney?.let {
-                showerConsumed = it
-                showerRemaining = "%.2f".format(if (showerPreDeduct - it < 0) 0.0 else showerPreDeduct - it)
-            }
-        } catch (_: Exception) {}
+        viewModelScope.launch(Dispatchers.Main.immediate) {
+            try {
+                val msg = gson.fromJson(message, MqttOrderMsg::class.java)
+                msg.orderNo?.let { orderNo -> if (currentOrderNo == null) { currentOrderNo = orderNo; showerSnCode?.let { sn -> updateOrderNo(sn, orderNo) } } }
+                msg.consumeMoney?.let {
+                    showerConsumed = it
+                    showerRemaining = "%.2f".format(if (showerPreDeduct - it < 0) 0.0 else showerPreDeduct - it)
+                }
+            } catch (_: Exception) {}
+        }
     }
 
     /**
@@ -578,7 +574,7 @@ class MainViewModel : ViewModel() {
     private fun onAutoClose(snCode: String) {
         if (!isShowering) return
         // 停止计时（弹窗期间洗澡界面不再走秒）
-        timerJob?.cancel(); orderPollJob?.cancel()
+        timerJob?.cancel(); orderPollJob?.cancel(); probeJob?.cancel()
 
         autoCloseDeviceName = selectedDevice?.displayName ?: lastDeviceName.ifEmpty { "热水器" }
         autoCloseElapsed = showerElapsedSec
@@ -670,6 +666,16 @@ class MainViewModel : ViewModel() {
                     } catch (_: Exception) {}
                 }
 
+                // 兜底探活：若 5 次轮询仍未返回关阀状态，调用 queryUsingSafe 核验水机是否已停
+                if (!closedOk) {
+                    try {
+                        val q = NetworkModule.apiService.queryUsingSafe(snCode = snCode, auth = devAuth)
+                        if (q.success && q.data?.orderNo == null && q.errorCode != 307) {
+                            closedOk = true
+                        }
+                    } catch (_: Exception) {}
+                }
+
                 // 3. 关阀确认成功后：先立即退出（不阻塞），后台异步等账单结算后弹金额
                 if (closedOk) {
                     val startTime = PrefsHelper.getStartedAt(snCode)  // 开阀时间戳，未开始时为 0
@@ -680,7 +686,7 @@ class MainViewModel : ViewModel() {
                         val isWater = selectedDevice?.isDrinkingWater == true ||
                             selectedDevice?.displayName?.contains("饮水") == true ||
                             (activeOrder?.deviceName?.contains("饮水") == true)
-                        val devTitle = if (isWater) "饮水机" else "热水器"
+                        val devTitle = if (isWater) "饮水机" else "出水设备"
                         if (amount != null) {
                             toastMessage = if (amount > 0) {
                                 "已停止，本次消费 ¥%.2f".format(amount)
@@ -692,7 +698,10 @@ class MainViewModel : ViewModel() {
                         }
                     }
                 } else {
-                    finishShower(snCode, null)
+                    showerError = "关水未确认，请检查水机或重试"
+                    toastMessage = "关水未确认成功，请再次点击或检查水机"
+                    cn.mudlife.app.utils.AppLogger.e("Shower", "关水未确认: 5次轮询与兜底queryUsing均未确认关闭 | sn: $snCode, 订单: $orderNo")
+                    isStopping = false
                 }
             } catch (e: Exception) {
                 checkKickEx(e)
@@ -765,7 +774,7 @@ class MainViewModel : ViewModel() {
         if (consumed != null) {
             toastMessage = "已停止，本次消费 ¥%.2f".format(consumed)
         } else {
-            toastMessage = "热水器已关闭"
+            toastMessage = "饮水机已关闭"
         }
 
         currentOrderNo = null; showerConsumed = 0.0; showerPreDeduct = 0.0
@@ -773,7 +782,7 @@ class MainViewModel : ViewModel() {
         autoDisConSec = 0
         PrefsHelper.setStartedAt(snCode, 0L) // 重置该设备计时器
         PrefsHelper.clearAutoDiscon(snCode)  // 清除自动关停倒计时
-        showerSnCode = null; timerJob?.cancel(); orderPollJob?.cancel()
+        showerSnCode = null; timerJob?.cancel(); orderPollJob?.cancel(); probeJob?.cancel(); probeJob?.cancel()
         try { mqttManager?.disconnect() } catch (_: Exception) {}
     }
 
@@ -800,7 +809,6 @@ class MainViewModel : ViewModel() {
         kickedOut = false
         selectedDevice = null
         showDeviceDetail = false
-        nearbyDevices.clear()
         recentDevices = emptyList()
         activeOrders.clear()
         activeDeviceSnCodes.clear()
@@ -813,26 +821,7 @@ class MainViewModel : ViewModel() {
 
     fun isDeviceActive(snCode: String) = snCode in activeDeviceSnCodes
 
-    // ── 寝室绑定 / 设备筛选 ──
 
-    /** 当前是否有绑定寝室 */
-    val hasBoundRoom: Boolean get() = PrefsHelper.boundRoom.isNotBlank()
-
-    /** 从附近设备名提取位置关键词：去掉 "热水器-"/"热水表-"/"洗手台N-" 前缀 */
-    fun extractLocationFromDevice(name: String): String {
-        var n = name
-        n = n.replaceFirst(Regex("^洗手台\\d*"), "").trim('-').trim()
-        n = n.replaceFirst(Regex("^热水[器表]"), "").trim('-').trim()
-        return n.trim()
-    }
-
-    /** 判断设备名是否匹配绑定的寝室（忽略大小写、空格、连字符） */
-    fun matchesBoundRoom(deviceName: String): Boolean {
-        val key = PrefsHelper.boundRoom.trim()
-        if (key.isEmpty()) return true
-        val norm = { s: String -> s.lowercase().replace(" ", "").replace("-", "") }
-        return norm(deviceName).contains(norm(key))
-    }
 
     // ── 挤号 ──
     private fun checkKick(msg: String?) {
@@ -1258,44 +1247,7 @@ class MainViewModel : ViewModel() {
         }
     }
 
-    // ── 设备发现 ──
-    fun addDevice(device: NearbyDevice) {
-        val idx = nearbyDevices.indexOfFirst { it.mac == device.mac }
-        if (idx >= 0) {
-            val e = nearbyDevices[idx]
-            if (abs(e.rssi - device.rssi) > 5 || e.deviceInfo == null) {
-                nearbyDevices[idx] = e.copy(rssi = device.rssi)
-                if (e.deviceInfo == null && fetchingMacs.add(device.mac)) fetchInfo(device.mac)
-            }
-        } else {
-            nearbyDevices.add(device); if (fetchingMacs.add(device.mac)) fetchInfo(device.mac)
-        }
-    }
 
-    private fun fetchInfo(mac: String) {
-        viewModelScope.launch {
-            try {
-                val resp = NetworkModule.apiService.getDeviceInfoSafe(mac)
-                if (resp.success && resp.data != null) {
-                    val info = resp.data; val i = nearbyDevices.indexOfFirst { it.mac == mac }
-                    if (i >= 0) nearbyDevices[i] = nearbyDevices[i].copy(deviceInfo = info)
-                    try {
-                        val pid = info.projectId?.toString()
-                        val q = NetworkModule.apiService.queryUsingSafe(snCode = info.snCode, auth = NetworkModule.authFields(overrideProjectId = pid))
-                        if (q.errorCode == 307 || (q.success && q.data?.orderNo != null)) {
-                            activeDeviceSnCodes.add(info.snCode)
-                            val owner = q.data?.isOwner ?: true
-                            if (owner && activeOrders.none { it.snCode == info.snCode }) {
-                                activeOrders.add(ActiveOrder(info.snCode, q.data?.orderNo ?: "", info.displayName, info.macAddress, info.typeEmoji, info.withholdMoney, projectId = pid))
-                                saveOrders()
-                            }
-                        }
-                    } catch (_: Exception) {}
-                } else checkKick(resp.displayMessage)
-            } catch (e: Exception) { checkKickEx(e) }
-            finally { fetchingMacs.remove(mac) }
-        }
-    }
 
     // ── 账单 ──
     fun loadBills() {

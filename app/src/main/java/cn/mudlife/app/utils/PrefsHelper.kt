@@ -172,14 +172,20 @@ object PrefsHelper {
 
     fun addRecentDevice(device: cn.mudlife.app.model.RecentDevice) {
         val list = getRecentDevices()
+        val existing = list.find { it.snCode == device.snCode || (it.mac.isNotEmpty() && it.mac == device.mac) }
+        val finalDevice = if (device.projectId.isNullOrEmpty() && !existing?.projectId.isNullOrEmpty()) {
+            device.copy(projectId = existing?.projectId)
+        } else {
+            device
+        }
         list.removeAll { it.snCode == device.snCode || (it.mac.isNotEmpty() && it.mac == device.mac) }
-        list.add(0, device)
+        list.add(0, finalDevice)
         val trimmed = list.take(4)
         prefs.edit().putString("recentDevices", gson.toJson(trimmed)).apply()
-        lastDeviceName = device.name
-        lastDeviceMac = device.mac
-        lastDeviceSnCode = device.snCode
-        lastDeviceEmoji = device.emoji
+        lastDeviceName = finalDevice.name
+        lastDeviceMac = finalDevice.mac
+        lastDeviceSnCode = finalDevice.snCode
+        lastDeviceEmoji = finalDevice.emoji
     }
 
     fun pinRecentDevice(snCode: String) {

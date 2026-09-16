@@ -104,6 +104,13 @@ interface QzxyService {
     fun getUseCode(): Call<ResponseBody>
 
     @FormUrlEncoded
+    @POST("/account/useCode/new/set")
+    fun setUseCode(
+        @Field("useCode") useCode: String,
+        @FieldMap auth: Map<String, String>
+    ): Call<ResponseBody>
+
+    @FormUrlEncoded
     @POST("/account/useCode/new/generate")
     fun generateUseCode(
         @FieldMap auth: Map<String, String>

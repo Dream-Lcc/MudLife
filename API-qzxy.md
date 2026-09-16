@@ -45,7 +45,8 @@
 | 账单列表 | GET | `/order/query/account/bill/list` | ✅ | 获取月度账单 |
 | 账单详情 | GET | `/order/query/account/bill/detail` | ✅ | 获取单笔账单详情 |
 | 获取使用码 | GET | `/account/useCode/new` | ✅ | 获取当前使用码 |
-| 生成使用码 | POST | `/account/useCode/new/generate` | ✅ | 生成新的使用码 |
+| 生成候选使用码 | POST | `/account/useCode/new/generate` | ✅ | 生成候选码（尚未生效） |
+| 应用候选使用码 | POST | `/account/useCode/new/set` | ✅ | 将候选码设为当前生效码 |
 | 使用码开关 | POST | `/account/useCode/new/status/update` | ✅ | 开启/关闭使用码 |
 | 发送短信验证码 | GET | `/user/verification/code/get` | ❌ | 发送验证码，需 secret |
 | 短信验证码登录 | POST | `/user/registerAndLogin` | ❌ | 用验证码注册/登录 |
@@ -367,6 +368,17 @@ GET /account/useCode/new
 | `useCode` | 使用码（8 位数字） |
 | `useCodeStatus` | 状态：`1` = 已开启，`0` = 已关闭 |
 | `useCodeRandom` | 随机数部分（后三位，与手机号后三位相同） |
+
+**生成并应用新码**：
+```text
+POST /account/useCode/new/generate
+POST /account/useCode/new/set
+Content-Type: application/x-www-form-urlencoded
+
+useCode=生成接口返回的8位候选码&accountId=xxx&projectId=xxx&...
+```
+
+`generate` 只返回候选码；必须再调用 `set`，新码才会成为设备端当前生效码。设置后应通过 `GET /account/useCode/new` 回读确认。
 
 **开关使用码**：
 ```
@@ -697,6 +709,13 @@ interface QzxyService {
 
     @GET("/account/useCode/new")
     fun getUseCode(): Call<ResponseBody>
+
+    @FormUrlEncoded
+    @POST("/account/useCode/new/set")
+    fun setUseCode(
+        @Field("useCode") useCode: String,
+        @FieldMap auth: Map<String, String>
+    ): Call<ResponseBody>
 
     @FormUrlEncoded
     @POST("/account/useCode/new/generate")

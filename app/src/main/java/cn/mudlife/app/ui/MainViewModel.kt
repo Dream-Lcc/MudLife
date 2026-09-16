@@ -16,6 +16,7 @@ import cn.mudlife.app.api.getBillListSafe
 import cn.mudlife.app.api.getUserProjectsSafe
 import cn.mudlife.app.api.getDeviceInfoSafe
 import cn.mudlife.app.api.getUseCodeSafe
+import cn.mudlife.app.api.setUseCodeSafe
 import cn.mudlife.app.api.updateUseCodeStatusSafe
 import cn.mudlife.app.api.generateUseCodeSafe
 import cn.mudlife.app.api.getWalletSafe
@@ -108,7 +109,6 @@ class MainViewModel : ViewModel() {
     var remainUseCodeTimes by mutableStateOf(20)
     var isRollingUseCode by mutableStateOf(false)
     var showDryerCodeModal by mutableStateOf(false)
-    private var useCodeLastConfirmedAt by mutableStateOf(PrefsHelper.useCodeLastConfirmedAt)
 
     // ── 国内免翻墙检查更新架构 ──
     var isCheckingUpdate by mutableStateOf(false)
@@ -882,26 +882,16 @@ class MainViewModel : ViewModel() {
                 val resp = NetworkModule.apiService.getUseCodeSafe()
                 if (resp.success && resp.data != null) {
                     val remoteCode = resp.data.useCode
-                    val localCode = PrefsHelper.useCode
-                    val hasLocalConfirmed = useCodeLastConfirmedAt > 0L && localCode.isNotEmpty()
-
-                    if (hasLocalConfirmed && remoteCode != localCode) {
-                        // 本地有通过 generate 确认的新码，但远端仍返回旧码 → 不覆盖
-                        cn.mudlife.app.utils.AppLogger.i("UseCode", "远端返回旧码 $remoteCode，本地新码 $localCode 受保护不予覆盖")
-                        useCodeData = useCodeData?.copy(useCodeStatus = resp.data.useCodeStatus)
-                            ?: resp.data.copy(useCode = localCode)
-                    } else {
-                        // 远端返回与本地一致（同步成功）或本地无确认记录 → 正常采纳远端
-                        useCodeData = resp.data
-                        if (remoteCode.isNotEmpty()) {
-                            PrefsHelper.useCode = remoteCode
-                            PrefsHelper.useCodeStatus = resp.data.useCodeStatus == 1
-                        }
-                        // 远端已同步，清除保护标记
-                        if (hasLocalConfirmed && remoteCode == localCode) {
-                            useCodeLastConfirmedAt = 0L
-                            PrefsHelper.useCodeLastConfirmedAt = 0L
-                        }
+                    // 服务端是使用码的唯一真实来源。旧版本曾用本地保护标记
+                    // 覆盖服务端返回值，会把“看起来成功”的旧码一直留在界面上。
+                    useCodeData = resp.data
+                    if (remoteCode.isNotEmpty()) {
+                        PrefsHelper.useCode = remoteCode
+                        PrefsHelper.useCodeStatus = resp.data.useCodeStatus == 1
+                    }
+                    // 清理旧版本用于掩盖同步失败的本地保护标记。
+                    if (PrefsHelper.useCodeLastConfirmedAt != 0L) {
+                        PrefsHelper.useCodeLastConfirmedAt = 0L
                     }
                     if (resp.data.remainTimes in 0..20) {
                         remainUseCodeTimes = resp.data.remainTimes
@@ -977,23 +967,57 @@ class MainViewModel : ViewModel() {
     }
 
     fun confirmUseCandidateCode() {
-        val codeToSave = candidateUseCode.ifEmpty { return }
+        val codeToUse = candidateUseCode.trim().ifEmpty { return }
         viewModelScope.launch {
             try {
-                // 1. 本地立即生效并持久化，保持原有开启状态
-                useCodeData = (useCodeData ?: UseCodeData()).copy(
-                    useCode = codeToSave,
-                    useCodeStatus = 1
+                // generate 只生成候选码；必须调用 set 才会把候选码写入当前账户。
+                val auth = NetworkModule.authFields()
+                val setResp = NetworkModule.apiService.setUseCodeSafe(
+                    useCode = codeToUse,
+                    auth = auth
                 )
-                PrefsHelper.useCode = codeToSave
-                PrefsHelper.useCodeStatus = true
-                useCodeLastConfirmedAt = System.currentTimeMillis()
-                PrefsHelper.useCodeLastConfirmedAt = useCodeLastConfirmedAt
+                if (!setResp.success) {
+                    toastMessage = setResp.displayMessage.orEmpty().ifEmpty { "设置新码失败" }
+                    return@launch
+                }
+
+                // “确认使用”同时保证使用码处于开启状态。
+                val statusResp = NetworkModule.apiService.updateUseCodeStatusSafe(1, auth)
+                if (!statusResp.success) {
+                    toastMessage = statusResp.displayMessage.orEmpty().ifEmpty { "新码已设置，但启用失败" }
+                    return@launch
+                }
+
+                // 回读服务端，只有当前生效码与候选码一致时才更新本地界面。
+                var confirmedData: UseCodeData? = null
+                for (attempt in 0 until 3) {
+                    val latestResp = NetworkModule.apiService.getUseCodeSafe()
+                    if (latestResp.success && latestResp.data?.useCode == codeToUse) {
+                        confirmedData = latestResp.data
+                        break
+                    }
+                    if (attempt < 2) delay(400L * (attempt + 1))
+                }
+                val serverData = confirmedData
+                if (serverData == null) {
+                    cn.mudlife.app.utils.AppLogger.w(
+                        "UseCode",
+                        "服务端未回读到新使用码，保留候选码等待重试"
+                    )
+                    toastMessage = "服务器尚未同步新码，请稍后重试"
+                    return@launch
+                }
+
+                // 只有服务端回读到候选码后，才更新本地显示并关闭弹窗。
+                useCodeData = serverData
+                PrefsHelper.useCode = codeToUse
+                PrefsHelper.useCodeStatus = serverData.useCodeStatus == 1
+                PrefsHelper.useCodeLastConfirmedAt = 0L
+                if (serverData.remainTimes in 0..20) {
+                    remainUseCodeTimes = serverData.remainTimes
+                }
                 showDryerCodeModal = false
                 candidateUseCode = ""
-
-                // 2. 链式调用服务端状态激活接口，确保服务端白名单与硬件同步
-                NetworkModule.apiService.updateUseCodeStatusSafe(1, NetworkModule.authFields())
                 toastMessage = "已成功更换并激活吹风机码"
             } catch (_: Exception) {
                 toastMessage = "激活新码网络异常，请检查网络"

@@ -76,7 +76,8 @@ loginCode={token}&userId={uid}&accountId={aid}&projectId={pid}&telephone={phone}
 | 账单列表 | GET | `/order/query/account/bill/list?month=2026-05&billRequestType=2` | |
 | 账单详情 | GET | `/order/query/account/bill/detail?orderId=xxx&consumeDate=xxx` | |
 | 使用码 | GET | `/account/useCode/new` | 获取当前使用码 |
-| 生成使用码 | POST | `/account/useCode/new/generate` | |
+| 生成候选使用码 | POST | `/account/useCode/new/generate` | 每日限次，仅生成候选码 |
+| 应用候选使用码 | POST | `/account/useCode/new/set` | useCode: 8位候选码 |
 | 使用码开关 | POST | `/account/useCode/new/status/update` | useCodeStatus: 1开/0关 |
 | 发送短信验证码 | GET | `/user/verification/code/get` | 需 secret（绑定账号） |
 | 验证码登录 | POST | `/user/registerAndLogin` | 用短信验证码登录 |

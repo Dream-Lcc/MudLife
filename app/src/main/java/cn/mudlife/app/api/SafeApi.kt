@@ -162,6 +162,11 @@ suspend fun QzxyService.updateUseCodeStatusSafe(
 suspend fun QzxyService.getUseCodeSafe(): BaseResponse<UseCodeData> =
     parse(getUseCode().awaitString(), UseCodeData::class.java)
 
+suspend fun QzxyService.setUseCodeSafe(
+    useCode: String,
+    auth: Map<String, String>
+): BaseResponse<UseCodeData> = parse(setUseCode(useCode, auth).awaitString(), UseCodeData::class.java)
+
 suspend fun QzxyService.generateUseCodeSafe(
     auth: Map<String, String>
 ): BaseResponse<UseCodeData> = parse(generateUseCode(auth).awaitString(), UseCodeData::class.java)

@@ -118,7 +118,7 @@ fun UserScreen(
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-                InfoRow("姓名", PrefsHelper.userName.ifEmpty { "江大学子" })
+                InfoRow("姓名", PrefsHelper.userName.ifEmpty { "成工学子" })
                 Spacer(Modifier.height(8.dp))
                 val maskedPhone = if (phone.length == 11) "${phone.take(3)}****${phone.takeLast(4)}" else phone
                 InfoRow("手机号", maskedPhone, isMono = true)
@@ -274,6 +274,7 @@ fun UserScreen(
             }
         }
 
+        /*
         // 5. 💨 吹风机使用码（居下方，与洗浴码严格镜像对称） 💨
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -377,7 +378,7 @@ fun UserScreen(
                 }
             }
         }
-
+        */
         // 6. 运行与诊断日志入口卡片 (极简素雅线框)
         Card(
             onClick = {

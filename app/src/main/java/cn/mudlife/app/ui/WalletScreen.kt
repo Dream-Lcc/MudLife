@@ -69,7 +69,11 @@ fun WalletScreen(viewModel: MainViewModel) {
     // 账单过滤分类：严格互斥过滤，彻底杜绝吹风机与洗浴相互混淆
     val filteredBills = remember(viewModel.billList, selectedCategory) {
         when (selectedCategory) {
-            BillCategory.ALL -> viewModel.billList
+            BillCategory.ALL -> viewModel.billList.filter {
+    !it.safeConsumeBillDTO.deviceTypeLabel.contains("直饮") &&
+    !it.safeConsumeBillDTO.deviceTypeLabel.contains("吹风")
+}
+
             BillCategory.WATER -> viewModel.billList.filter {
                 it.safeConsumeBillDTO.deviceTypeLabel.contains("直饮")
             }
